@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ConversionAttribution } from "@/components/code/ConversionAttribution";
-import "./globals.css";
+import "../globals.css";
 
 export const metadata: Metadata = {
   title: "Plomería Hub — Código de Plomería de Florida",
