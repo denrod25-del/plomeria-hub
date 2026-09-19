@@ -17,6 +17,55 @@ See `INTEGRATION-KIT.md` for the original kit documentation.
 
 ---
 
+## Two sites in one app
+
+This repo now serves two independent surfaces, each with its own root layout
+(Next.js [multiple root layouts](https://nextjs.org/docs/app/building-your-application/routing/route-groups#creating-multiple-root-layouts)),
+so neither one inherits the other's chrome, language, or styling:
+
+| Route group | URLs | What it is |
+|---|---|---|
+| `app/(hub)/` | `/`, `/codigo/*`, `/cuestionario` | **Plomería Hub** — the FBC-P reference app, unchanged (`lang="es"`) |
+| `app/(trades)/` | `/trades`, `/trades/quiz`, `/trades/results`, `/trades/catalog/*` | **Rung** — the trade-matching site (`lang="en"`) |
+
+### Rung — find the trade you were built for
+
+A trade-matching quiz in the mold of tradesonramp.com: twelve questions, thirty
+trades, no account. Original branding and copy — the structure is the thing
+being mirrored, not the content.
+
+- `/trades` — landing page (hero, outcomes, how it works, catalog preview, sample arc, testimonials, FAQ)
+- `/trades/quiz` — the twelve-question flow plus an optional ZIP step
+- `/trades/results` — top match, why it fits *and what you'd have to accept*, ten-year arc, working-style profile, shortlist, local apprenticeship links
+- `/trades/catalog` and `/trades/catalog/[slug]` — all 30 trades, statically generated
+
+**How the matching works.** Every trade and every quiz answer is a point in the
+same eight-axis trait space (`lib/trades/dimensions.ts`): setting, physical
+load, tolerance, people contact, systems thinking, heights, routine, and build
+vs. maintain. Answers sum into a profile from a neutral 50 on each axis, and
+each trade is scored by **weighted L1 distance** — L1 rather than Euclidean on
+purpose, so one disqualifying axis (no heights → ironworker) costs what it
+should instead of being averaged away. Per-trade weights in `lib/trades/trades.ts`
+mark which axes a trade is genuinely inflexible about.
+
+**No server state.** Answers are encoded into the results URL, so a result is
+shareable and bookmarkable with no account and nothing stored server-side.
+In-progress answers are kept in `sessionStorage` (guarded, per-tab) purely so
+the browser back button doesn't cost you twelve questions.
+
+| Path | What it is |
+|---|---|
+| `lib/trades/dimensions.ts` | The eight axes, their poles, and score → prose helpers |
+| `lib/trades/trades.ts` | The 30 trades: trait profiles, weights, pay ladders, entry paths |
+| `lib/trades/quiz.ts` | The twelve questions and each answer's per-axis effects |
+| `lib/trades/match.ts` | Scoring, ranking, and URL encode/decode |
+| `components/trades/*` | Site chrome, quiz flow, profile bars, ladder, trade cards |
+
+> Pay figures throughout are **illustrative national ranges for planning, not
+> offers**, and are surfaced with that disclaimer in the UI.
+
+---
+
 ## Run locally
 
 ```bash
