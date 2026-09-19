@@ -83,6 +83,16 @@ export function QuizFlow({ restart = false }: { restart?: boolean }) {
     // saved run instead of resuming the finished one.
     if (restart) {
       clearSavedQuiz();
+      // Consume the flag. It means "reset now", not "reset on every load" — if
+      // it stayed in the URL, a refresh partway through the new attempt would
+      // re-run this and wipe the answers just saved. Rewriting history rather
+      // than routing keeps `restart` stable for this mount, so the effect
+      // doesn't re-run and spuriously restore what was cleared a tick ago.
+      try {
+        window.history.replaceState(null, "", "/trades/quiz");
+      } catch {
+        /* History unavailable — the reset above still happened. */
+      }
       return;
     }
     const saved = loadSaved();
