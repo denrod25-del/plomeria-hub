@@ -8,6 +8,7 @@ import {
   getDimension,
   normalizeZip,
   profileFromAnswers,
+  limitsFromAnswers,
   rankTrades,
   QUIZ,
 } from "@/lib/trades";
@@ -39,7 +40,8 @@ export default function ResultsPage({
 
   const zip = normalizeZip(searchParams.zip);
   const profile = profileFromAnswers(answers);
-  const ranked = rankTrades(profile);
+  const limits = limitsFromAnswers(answers);
+  const { matches: ranked, ruledOut } = rankTrades(profile, limits);
   const [top, ...rest] = ranked;
   const runnersUp = rest.slice(0, 4);
   const alsoRan = rest.slice(4, 10);
@@ -80,7 +82,7 @@ export default function ResultsPage({
             <p className="mt-6 text-sm text-zinc-400">
               You answered {answeredCount} of {QUIZ.length} questions. The
               unanswered axes were treated as neutral —{" "}
-              <Link href="/trades/quiz" className="underline underline-offset-2 hover:text-white">
+              <Link href="/trades/quiz?restart=1" className="underline underline-offset-2 hover:text-white">
                 retake the quiz
               </Link>{" "}
               for a sharper result.
@@ -239,6 +241,29 @@ export default function ResultsPage({
             Furthest from your profile: <strong className="font-semibold text-zinc-700">{worst.trade.name}</strong>{" "}
             at {worst.score}%. Knowing what to rule out is worth something too.
           </p>
+
+          {ruledOut.length > 0 && (
+            <div className="mt-8 rounded-xl border border-zinc-200 bg-white p-6">
+              <h3 className="text-base font-bold text-zinc-950">
+                Ruled out by your dealbreakers
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-600">
+                You named {ruledOutAxes(ruledOut)} as something you wouldn't
+                accept, so {ruledOut.length} trade
+                {ruledOut.length === 1 ? "" : "s"} came off the list entirely
+                rather than being ranked low:{" "}
+                <span className="text-zinc-700">
+                  {ruledOut.map((r) => r.trade.name).join(", ")}
+                </span>
+                .
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-zinc-500">
+                If one of those appeals to you anyway, retake the quiz and
+                soften that answer — several of them are among the best-paid
+                trades on the list.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -258,7 +283,7 @@ export default function ResultsPage({
           </p>
           <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
             <Link
-              href="/trades/quiz"
+              href="/trades/quiz?restart=1"
               className="rounded-full border border-zinc-300 px-6 py-3 text-base font-semibold text-zinc-800 transition-colors hover:bg-zinc-100"
             >
               Retake the quiz
@@ -298,6 +323,17 @@ function NoAnswers() {
       </p>
     </div>
   );
+}
+
+/** Human-readable list of the axes that excluded trades, for the copy above. */
+function ruledOutAxes(
+  ruledOut: { dimension: Parameters<typeof getDimension>[0] }[]
+): string {
+  const labels = Array.from(
+    new Set(ruledOut.map((r) => getDimension(r.dimension).label.toLowerCase()))
+  );
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 }
 
 function article(name: string): string {

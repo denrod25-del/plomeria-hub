@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   QUIZ,
   encodeAnswers,
@@ -23,7 +23,12 @@ const TOTAL_STEPS = QUIZ.length + 1;
  */
 const STORAGE_KEY = "rung.quiz.v1";
 
-type SavedState = { step: number; answers: QuizAnswers; zip: string };
+/**
+ * Deliberately no ZIP: the ZIP step tells people it isn't saved, and location
+ * data shouldn't sit in storage for the rest of the tab's session on the
+ * strength of a convenience feature. Resuming asks for it again.
+ */
+type SavedState = { step: number; answers: QuizAnswers };
 
 function loadSaved(): SavedState | null {
   try {
@@ -41,7 +46,7 @@ function loadSaved(): SavedState | null {
       typeof parsed.step === "number" && parsed.step >= 0 && parsed.step <= ZIP_STEP
         ? parsed.step
         : 0;
-    return { step, answers, zip: typeof parsed.zip === "string" ? parsed.zip : "" };
+    return { step, answers };
   } catch {
     return null;
   }
@@ -55,7 +60,15 @@ function saveState(state: SavedState) {
   }
 }
 
-export function QuizFlow() {
+export function clearSavedQuiz() {
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+export function QuizFlow({ restart = false }: { restart?: boolean }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<QuizAnswers>({});
@@ -66,36 +79,61 @@ export function QuizFlow() {
   // Restore after mount rather than in useState, so the server-rendered first
   // question and the client's first paint agree.
   useEffect(() => {
+    // "Retake the quiz" is an explicit request to start over, so it drops any
+    // saved run instead of resuming the finished one.
+    if (restart) {
+      clearSavedQuiz();
+      return;
+    }
     const saved = loadSaved();
     if (saved && Object.keys(saved.answers).length > 0) {
       setStep(saved.step);
       setAnswers(saved.answers);
-      setZip(saved.zip);
       setRestored(true);
     }
-  }, []);
+  }, [restart]);
 
   useEffect(() => {
     if (step === 0 && Object.keys(answers).length === 0) return;
-    saveState({ step, answers, zip });
-  }, [step, answers, zip]);
+    saveState({ step, answers });
+  }, [step, answers]);
+
+  // One pending advance at a time. Without this, a double-tap schedules two
+  // independent increments and silently skips the question in between, and
+  // pressing Back during the delay is undone by the stale timer.
+  const advanceTimer = useRef<number | null>(null);
+
+  const cancelAdvance = useCallback(() => {
+    if (advanceTimer.current !== null) {
+      window.clearTimeout(advanceTimer.current);
+      advanceTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelAdvance, [cancelAdvance]);
 
   const question = step < ZIP_STEP ? QUIZ[step] : null;
   const answered = question ? answers[question.id] : undefined;
   const progress = Math.round(((step + 1) / TOTAL_STEPS) * 100);
 
   const goBack = useCallback(() => {
+    cancelAdvance();
     setZipError(null);
     setStep((s) => Math.max(0, s - 1));
-  }, []);
+  }, [cancelAdvance]);
 
   const choose = useCallback(
     (questionId: string, optionId: string) => {
       setAnswers((prev) => ({ ...prev, [questionId]: optionId }));
       // Small pause so the selection is visible before the step changes.
-      window.setTimeout(() => setStep((s) => Math.min(ZIP_STEP, s + 1)), 180);
+      // Re-clicking replaces the pending advance rather than queueing another.
+      cancelAdvance();
+      advanceTimer.current = window.setTimeout(() => {
+        advanceTimer.current = null;
+        setStep((s) => Math.min(ZIP_STEP, s + 1));
+      }, 180);
     },
-    []
+    [cancelAdvance]
   );
 
   const submit = useCallback(
@@ -150,11 +188,8 @@ export function QuizFlow() {
           <button
             type="button"
             onClick={() => {
-              try {
-                window.sessionStorage.removeItem(STORAGE_KEY);
-              } catch {
-                /* nothing to clear */
-              }
+              cancelAdvance();
+              clearSavedQuiz();
               setAnswers({});
               setZip("");
               setStep(0);
@@ -227,7 +262,9 @@ export function QuizFlow() {
           </h2>
           <p className="mt-3 text-[15px] leading-relaxed text-zinc-600">
             A ZIP code lets the results point at programs, union halls, and
-            schools near you. It's optional, it isn't stored, and you'll still
+            schools near you. It's optional and isn't saved to an account or
+            kept after you leave — it does appear in your results link, so treat
+            that link the way you'd treat anything with your area in it. You'll
             get your full match list without it.
           </p>
 
@@ -308,7 +345,10 @@ export function QuizFlow() {
         {question && (
           <button
             type="button"
-            onClick={() => setStep((s) => Math.min(ZIP_STEP, s + 1))}
+            onClick={() => {
+              cancelAdvance();
+              setStep((s) => Math.min(ZIP_STEP, s + 1));
+            }}
             className="text-sm font-medium text-zinc-500 underline underline-offset-4 transition-colors hover:text-zinc-900"
           >
             Skip this question

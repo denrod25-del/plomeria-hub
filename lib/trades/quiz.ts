@@ -10,6 +10,14 @@ export type QuizOption = {
   label: string;
   detail?: string;
   effects: Partial<Record<DimensionId, number>>;
+  /**
+   * A stated dealbreaker, as opposed to a preference. Effects from other
+   * questions sum freely and can cancel each other out; a limit is applied
+   * *after* that sum and clamps the axis, so answering "hard no" to heights
+   * cannot be quietly eroded by two unrelated answers that happen to nudge
+   * exposure upward. Limits also drive outright exclusion in `match.ts`.
+   */
+  limits?: Partial<Record<DimensionId, { min?: number; max?: number }>>;
 };
 
 export type QuizQuestion = {
@@ -85,8 +93,8 @@ export const QUIZ: QuizQuestion[] = [
     options: [
       { id: "love", label: "Genuinely fine, maybe even like it", detail: "Towers, steel, roofs, confined spaces — no issue.", effects: { exposure: 38, setting: 15 } },
       { id: "ok", label: "I can do it, I don't seek it out", detail: "A ladder and a roof, sure. A tower, if I had to.", effects: { exposure: 12 } },
-      { id: "prefer-not", label: "I'd rather keep my feet near the ground", detail: "Occasional is fine, daily is not.", effects: { exposure: -22 } },
-      { id: "no", label: "Hard no", detail: "Not what I want out of a career.", effects: { exposure: -40 } },
+      { id: "prefer-not", label: "I'd rather keep my feet near the ground", detail: "Occasional is fine, daily is not.", effects: { exposure: -22 }, limits: { exposure: { max: 45 } } },
+      { id: "no", label: "Hard no", detail: "Not what I want out of a career.", effects: { exposure: -40 }, limits: { exposure: { max: 15 } } },
     ],
   },
   {
@@ -149,10 +157,10 @@ export const QUIZ: QuizQuestion[] = [
     short: "Limits",
     prompt: "Last one. What would make you quit a job you otherwise liked?",
     options: [
-      { id: "cold", label: "Working outside in bad weather all winter", effects: { setting: -30 } },
-      { id: "indoors", label: "Being stuck inside the same four walls", effects: { setting: 28, variety: 15 } },
-      { id: "dirty", label: "Coming home filthy and beat up every day", effects: { exertion: -28 } },
-      { id: "boring", label: "Doing the exact same task over and over", effects: { variety: 28, systems: 12 } },
+      { id: "cold", label: "Working outside in bad weather all winter", effects: { setting: -30 }, limits: { setting: { max: 45 } } },
+      { id: "indoors", label: "Being stuck inside the same four walls", effects: { setting: 28, variety: 15 }, limits: { setting: { min: 55 } } },
+      { id: "dirty", label: "Coming home filthy and beat up every day", effects: { exertion: -28 }, limits: { exertion: { max: 45 } } },
+      { id: "boring", label: "Doing the exact same task over and over", effects: { variety: 28, systems: 12 }, limits: { variety: { min: 55 } } },
     ],
   },
 ];

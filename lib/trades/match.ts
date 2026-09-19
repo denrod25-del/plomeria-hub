@@ -9,10 +9,53 @@ import { TRADES, type Trade } from "./trades";
 
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
 
+/** A stated dealbreaker, collected from the answers that declare one. */
+export type Limit = { min?: number; max?: number };
+export type Limits = Partial<Record<DimensionId, Limit>>;
+
+/**
+ * How far past a stated limit a trade has to sit before it is ruled out rather
+ * than merely penalized.
+ */
+const EXCLUSION_MARGIN = 40;
+
+/**
+ * Exclusion additionally requires the trade to be *defined* by the axis, which
+ * is what a weight of 1.5+ already means. Distance alone over-excludes: a hard
+ * "no" on heights caps exposure at 15, and without this gate that would rule
+ * out electricians and plumbers — trades with ladders and crawlspaces, not
+ * trades built around height. Ironworker and lineworker still go.
+ */
+const EXCLUSION_MIN_WEIGHT = 1.5;
+
+/** Collect the caps declared by the chosen answers. */
+export function limitsFromAnswers(answers: QuizAnswers): Limits {
+  const limits: Limits = {};
+  for (const question of QUIZ) {
+    const option = question.options.find((o) => o.id === answers[question.id]);
+    if (!option?.limits) continue;
+    for (const [dim, limit] of Object.entries(option.limits)) {
+      const id = dim as DimensionId;
+      const existing = limits[id] ?? {};
+      // Keep the tightest limit if two answers constrain the same axis.
+      limits[id] = {
+        min: Math.max(existing.min ?? -Infinity, limit.min ?? -Infinity) || undefined,
+        max: Math.min(existing.max ?? Infinity, limit.max ?? Infinity),
+      };
+      if (!Number.isFinite(limits[id]!.min!)) delete limits[id]!.min;
+      if (!Number.isFinite(limits[id]!.max!)) delete limits[id]!.max;
+    }
+  }
+  return limits;
+}
+
 /**
  * Fold a set of answers into a point in trait space. Every answer's effects are
  * summed against a neutral 50 and then clamped, so unanswered questions simply
  * leave their axes closer to the middle rather than skewing the result.
+ *
+ * Declared limits are applied *after* the sum, so a stated dealbreaker can't be
+ * cancelled out by unrelated answers that happen to push the same axis back.
  */
 export function profileFromAnswers(answers: QuizAnswers): Profile {
   const profile = neutralProfile();
@@ -25,8 +68,31 @@ export function profileFromAnswers(answers: QuizAnswers): Profile {
       profile[dim as DimensionId] += delta as number;
     }
   }
-  for (const id of DIMENSION_IDS) profile[id] = clamp(profile[id]);
+  const limits = limitsFromAnswers(answers);
+  for (const id of DIMENSION_IDS) {
+    let value = clamp(profile[id]);
+    const limit = limits[id];
+    if (limit?.max !== undefined) value = Math.min(value, limit.max);
+    if (limit?.min !== undefined) value = Math.max(value, limit.min);
+    profile[id] = value;
+  }
   return profile;
+}
+
+/**
+ * Whether a trade sits so far past a stated dealbreaker that it should be ruled
+ * out rather than ranked. Returns the offending axis, for the "ruled out" copy.
+ */
+export function vetoedBy(trade: Trade, limits: Limits): DimensionId | null {
+  for (const id of DIMENSION_IDS) {
+    const limit = limits[id];
+    if (!limit) continue;
+    if ((trade.weights?.[id] ?? 1) < EXCLUSION_MIN_WEIGHT) continue;
+    const value = trade.profile[id];
+    if (limit.max !== undefined && value - limit.max >= EXCLUSION_MARGIN) return id;
+    if (limit.min !== undefined && limit.min - value >= EXCLUSION_MARGIN) return id;
+  }
+  return null;
 }
 
 export type MatchReason = {
@@ -77,11 +143,40 @@ export function scoreTrade(profile: Profile, trade: Trade): Match {
   };
 }
 
-export function rankTrades(profile: Profile, limit = TRADES.length): Match[] {
-  return TRADES.map((trade) => scoreTrade(profile, trade))
-    .sort((a, b) => b.score - a.score || a.trade.name.localeCompare(b.trade.name))
-    .slice(0, limit);
+export type Ranking = {
+  /** Trades still in the running, best first. */
+  matches: Match[];
+  /** Trades removed outright by a stated dealbreaker, with the axis that did it. */
+  ruledOut: { trade: Trade; dimension: DimensionId }[];
+};
+
+/**
+ * Rank every trade, removing the ones a stated dealbreaker rules out.
+ *
+ * If the dealbreakers would leave almost nothing to choose from, the exclusions
+ * are reported but not applied — an empty results page helps nobody, and at
+ * that point the honest thing is to show the ranking and name the tension.
+ */
+export function rankTrades(profile: Profile, limits: Limits = {}): Ranking {
+  const ruledOut: { trade: Trade; dimension: DimensionId }[] = [];
+  const survivors: Trade[] = [];
+
+  for (const trade of TRADES) {
+    const dimension = vetoedBy(trade, limits);
+    if (dimension) ruledOut.push({ trade, dimension });
+    else survivors.push(trade);
+  }
+
+  const pool = survivors.length >= MIN_POOL ? survivors : TRADES;
+  const matches = pool
+    .map((trade) => scoreTrade(profile, trade))
+    .sort((a, b) => b.score - a.score || a.trade.name.localeCompare(b.trade.name));
+
+  return { matches, ruledOut };
 }
+
+/** Below this many survivors, exclusions are reported rather than enforced. */
+const MIN_POOL = 8;
 
 /**
  * Answers are round-tripped through the URL so a results page can be shared,
